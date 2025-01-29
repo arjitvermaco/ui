@@ -18,6 +18,12 @@ type ChatResponse = {
   }
 }
 
+type ChatRequest = {
+  message: string
+  conversation_id?: string | null
+  system_instruction?: string
+}
+
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -50,22 +56,60 @@ export default function Chat() {
     setIsLoading(true)
 
     try {
+      const payload: ChatRequest = {
+        message: userMessage,
+      }
+      
+      if (conversationId) {
+        payload.conversation_id = conversationId
+      }
+
+      console.log('Sending request with payload:', payload)
+
       const response = await fetch('http://localhost:8000/api/v1/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: JSON.stringify({
-          message: userMessage,
-          conversation_id: conversationId,
-        }),
+        body: JSON.stringify(payload)
       })
 
+      console.log('Response status:', response.status)
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
+
+      // Get the raw response text first
+      const responseText = await response.text()
+      console.log('Raw response:', responseText)
+
       if (!response.ok) {
-        throw new Error('Failed to get response')
+        let errorMessage = 'Failed to get response'
+        
+        try {
+          // Try to parse the error response as JSON
+          const errorData = responseText ? JSON.parse(responseText) : null
+          if (errorData) {
+            errorMessage = errorData.detail || errorData.message || 'Unknown error occurred'
+            console.error('API Error Data:', errorData)
+          }
+        } catch (parseError) {
+          console.error('Error parsing error response:', parseError)
+          console.error('Raw error response:', responseText)
+        }
+
+        toast.error(errorMessage)
+        return
       }
 
-      const data: ChatResponse = await response.json()
+      // Parse the successful response
+      let data: ChatResponse
+      try {
+        data = JSON.parse(responseText)
+      } catch (parseError) {
+        console.error('Error parsing success response:', parseError)
+        console.error('Raw success response:', responseText)
+        throw new Error('Invalid response format from server')
+      }
       
       setConversationId(data.conversation_id)
       setMessages(prev => [...prev, {
@@ -74,7 +118,8 @@ export default function Chat() {
         timestamp: data.created_at
       }])
     } catch (error) {
-      toast.error('Failed to send message. Please try again.')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message'
+      toast.error(errorMessage)
       console.error('Chat error:', error)
     } finally {
       setIsLoading(false)
